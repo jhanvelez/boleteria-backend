@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Query,
   Patch,
   Param,
   Delete,
@@ -10,6 +11,7 @@ import {
 import { EstablishmentsService } from './establishments.service';
 import { CreateEstablishmentDto } from './dto/create-establishment.dto';
 import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 @Controller('establishments')
 export class EstablishmentsController {
@@ -21,8 +23,8 @@ export class EstablishmentsController {
   }
 
   @Get()
-  findAll() {
-    return this.establishmentsService.findAll();
+  async findAll(@Query() paginationQuery: PaginationQueryDto) {
+    return this.establishmentsService.findAll(paginationQuery);
   }
 
   @Get(':id')
