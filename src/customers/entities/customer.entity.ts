@@ -1,0 +1,59 @@
+import {
+  Entity,
+  Column,
+  PrimaryColumn,
+  CreateDateColumn,
+  OneToMany,
+} from 'typeorm';
+import { Point } from 'src/points/entities/point.entity';
+
+@Entity({ name: 'customers' })
+export class Customer {
+  @PrimaryColumn({ type: 'varchar' })
+  id: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  contactId: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  formId: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  name: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  email: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  phone: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  organization: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  postalCode: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  city: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  state: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  country: string;
+
+  @Column({ type: 'text', nullable: true })
+  address: string;
+
+  @Column({ type: 'boolean', default: false })
+  external: boolean;
+
+  @CreateDateColumn({ type: 'timestamptz', nullable: true })
+  createdAt: Date;
+
+  @Column({ type: 'json', nullable: true })
+  raw: any;
+
+  @OneToMany(() => Point, (point) => point.customer)
+  points: Point[];
+}
