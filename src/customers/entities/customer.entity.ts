@@ -21,6 +21,9 @@ export class Customer {
   formId: string;
 
   @Column({ type: 'varchar', nullable: true })
+  identification: string;
+
+  @Column({ type: 'varchar', nullable: true })
   name: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -52,6 +55,9 @@ export class Customer {
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   currentBalance: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  accumulatedValue: number;
 
   @OneToMany(() => Ticket, (ticket) => ticket.customer)
   tickets: Ticket[];
