@@ -31,7 +31,7 @@ export class CustomersService {
 
     if (search) {
       qb.where(
-        'cusmtomer.serialNumber ILIKE :search OR meter.model ILIKE :search',
+        'cusmtomer.identification ILIKE :search OR cusmtomer.name ILIKE :search',
         {
           search: `%${search}%`,
         },
