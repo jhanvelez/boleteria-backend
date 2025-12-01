@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Establishment } from './entities/establishment.entity';
 import { CreateEstablishmentDto } from './dto/create-establishment.dto';
 import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { Premise } from 'src/premise/entities/premise.entity';
 
 @Injectable()
@@ -50,11 +51,40 @@ export class EstablishmentsService {
     return this.repo.save(newEstablishment);
   }
 
-  async findAll(): Promise<Establishment[]> {
-    return this.repo.find({
-      relations: ['premise'],
-      order: { nombreComercial: 'ASC' },
-    });
+  async findAll(query: PaginationQueryDto): Promise<{
+    data: Establishment[];
+    total: number;
+    currentPage: number;
+    totalPages: number;
+  }> {
+    const { page = 1, limit = 10, search } = query;
+    const skip = (page - 1) * limit;
+
+    const qb = this.repo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.premise', 'premise');
+
+    if (search) {
+      qb.where(
+        `(p.numero_local ILIKE :search OR p.clase_local ILIKE :search OR p.destinacion ILIKE :search)`,
+        {
+          search: `%${search}%`,
+        },
+      );
+    }
+
+    const [data, total] = await qb
+      .skip(skip)
+      .take(limit)
+      .orderBy('p.nombreComercial', 'ASC')
+      .getManyAndCount();
+
+    return {
+      data,
+      total,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string): Promise<Establishment> {

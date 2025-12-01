@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsIn,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateRaffleDto {
   @IsNotEmpty()
@@ -17,13 +18,26 @@ export class CreateRaffleDto {
 
   @IsOptional()
   @IsDateString()
-  startDate?: string;
+  @Transform(({ value }) => value)
+  start_date?: string;
 
   @IsOptional()
   @IsDateString()
-  endDate?: string;
+  @Transform(({ value }) => value)
+  end_date?: string;
 
   @IsOptional()
+  @IsString()
   @IsIn(['pending', 'active', 'finished'])
-  status?: 'pending' | 'active' | 'finished';
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  ticketPrefix?: string;
+
+  @IsOptional()
+  totalTickets?: number;
+
+  @IsOptional()
+  ticketPrice?: number;
 }

@@ -4,31 +4,57 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
+import { Ticket } from '../../tickets/entities/ticket.entity';
+import { Purchase } from '../../purchases/entities/purchase.entity';
 
-@Entity('raffles')
+@Entity({ name: 'raffles' })
 export class Raffle {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 100 })
+  @Column({ type: 'varchar' })
   name: string;
 
   @Column({ type: 'text', nullable: true })
-  description?: string;
+  description: string;
 
-  @Column({ type: 'timestamp', nullable: true })
-  startDate?: Date;
+  @Column({ type: 'varchar', default: 'ticket' })
+  ticketPrefix: string;
 
-  @Column({ type: 'timestamp', nullable: true })
-  endDate?: Date;
+  @Column({
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP',
+    name: 'start_date',
+  })
+  start_date: Date;
 
-  @Column({ default: 'pending' })
-  status: 'pending' | 'active' | 'finished';
+  @Column({
+    type: 'timestamp',
+    default: () => "CURRENT_TIMESTAMP + INTERVAL \'7 days\'",
+    name: 'end_date',
+  })
+  end_date: Date;
 
-  @CreateDateColumn()
+  @Column({ type: 'varchar', default: 'active' })
+  status: string;
+
+  @Column({ type: 'int', nullable: true })
+  totalTickets: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  ticketPrice: number;
+
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
+
+  @OneToMany(() => Ticket, (ticket) => ticket.raffle)
+  tickets: Ticket[];
+
+  @OneToMany(() => Purchase, (purchase) => purchase.raffle)
+  purchases: Purchase[];
 }

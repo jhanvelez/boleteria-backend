@@ -1,28 +1,39 @@
 import {
+  Entity,
+  PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
-  Entity,
   ManyToOne,
-  PrimaryGeneratedColumn,
+  JoinColumn,
 } from 'typeorm';
-import { Customer } from 'src/customers/entities/customer.entity';
+import { Customer } from '../../customers/entities/customer.entity';
+import { Purchase } from '../../purchases/entities/purchase.entity';
 
-@Entity()
+@Entity({ name: 'points' })
 export class Point {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column('decimal', { precision: 12, scale: 2 })
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
   purchaseAmount: number;
 
-  @Column('int')
+  @Column({ type: 'int' })
   points: number;
 
-  @ManyToOne(() => Customer, (customer) => customer.points, {
-    onDelete: 'CASCADE',
-  })
+  @ManyToOne(() => Customer, (customer) => customer.points)
+  @JoinColumn({ name: 'customerId' })
   customer: Customer;
 
-  @CreateDateColumn()
+  @Column()
+  customerId: string;
+
+  @ManyToOne(() => Purchase, (purchase) => purchase.points)
+  @JoinColumn({ name: 'purchaseId' })
+  purchase: Purchase;
+
+  @Column()
+  purchaseId: string;
+
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

@@ -19,7 +19,7 @@ export class SchedulerService {
   private readonly BEARER_TOKEN = process.env.LEADCONNECTOR_TOKEN;
 
   private readonly BASE_URL =
-    'https://services.leadconnectorhq.com/forms/submissions/?locationId=AwteSl6b12ZdYDMO2W73&limit=50';
+    'https://services.leadconnectorhq.com/forms/submissions/?locationId=Uzy95XtptzTJjCoRdncV&limit=1000';
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fetchCustomers() {

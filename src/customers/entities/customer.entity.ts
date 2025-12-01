@@ -3,9 +3,11 @@ import {
   Column,
   PrimaryColumn,
   CreateDateColumn,
+  UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
 import { Point } from 'src/points/entities/point.entity';
+import { Ticket } from 'src/tickets/entities/ticket.entity';
 
 @Entity({ name: 'customers' })
 export class Customer {
@@ -48,12 +50,21 @@ export class Customer {
   @Column({ type: 'boolean', default: false })
   external: boolean;
 
-  @CreateDateColumn({ type: 'timestamptz', nullable: true })
-  createdAt: Date;
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  currentBalance: number;
+
+  @OneToMany(() => Ticket, (ticket) => ticket.customer)
+  tickets: Ticket[];
 
   @Column({ type: 'json', nullable: true })
   raw: any;
 
   @OneToMany(() => Point, (point) => point.customer)
   points: Point[];
+
+  @CreateDateColumn({ type: 'timestamptz', nullable: true })
+  createdAt: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz', nullable: true })
+  updatedAt: Date;
 }

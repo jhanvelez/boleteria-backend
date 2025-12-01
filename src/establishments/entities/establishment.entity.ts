@@ -62,7 +62,7 @@ export class Establishment {
   @OneToMany(() => Purchase, (purchase) => purchase.establishment)
   purchases: Purchase[];
 
-  @Column({ default: false })
+  @Column({ default: true })
   isActive: boolean;
 
   @CreateDateColumn()

@@ -5,10 +5,12 @@ import {
   ManyToOne,
   CreateDateColumn,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
 import { Customer } from 'src/customers/entities/customer.entity';
 import { Establishment } from 'src/establishments/entities/establishment.entity';
 import { Raffle } from 'src/raffles/entities/raffle.entity';
+import { Ticket } from 'src/tickets/entities/ticket.entity';
 
 @Entity('purchases')
 export class Purchase {
@@ -41,6 +43,18 @@ export class Purchase {
 
   @Column({ default: 'completed' })
   status: 'pending' | 'completed' | 'cancelled';
+
+  @Column({ type: 'int', default: 0 })
+  ticketsGenerated: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  previousBalance: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  newBalance: number;
+
+  @OneToMany(() => Ticket, (ticket) => ticket.purchase)
+  tickets: Ticket[];
 
   @CreateDateColumn()
   purchaseDate: Date;

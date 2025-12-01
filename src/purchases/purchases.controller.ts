@@ -1,39 +1,119 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  HttpStatus,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
 import { PurchasesService } from './purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 @Controller('purchases')
 export class PurchasesController {
-  constructor(private readonly service: PurchasesService) {}
+  constructor(private readonly purchasesService: PurchasesService) {}
 
   @Post()
-  create(@Body() dto: CreatePurchaseDto) {
-    return this.service.create(dto);
+  async create(@Body() createPurchaseDto: CreatePurchaseDto) {
+    const purchase = await this.purchasesService.create(createPurchaseDto);
+    return {
+      statusCode: HttpStatus.CREATED,
+      message: 'Compra registrada exitosamente',
+      data: purchase,
+    };
   }
 
   @Get()
-  findAll(@Query() query: PaginationQueryDto) {
-    return this.service.findAll(query);
+  async findAll(@Query() paginationQueryDto: PaginationQueryDto) {
+    return await this.purchasesService.findAll(paginationQueryDto);
   }
 
   @Get('stats')
-  getStats() {
-    return this.service.getPurchaseStats();
+  async getStats() {
+    const stats = await this.purchasesService.getPurchaseStats();
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Estadísticas obtenidas exitosamente',
+      data: stats,
+    };
   }
 
   @Get('invoice/:invoiceNumber')
-  findByInvoiceNumber(@Param('invoiceNumber') invoiceNumber: string) {
-    return this.service.findByInvoiceNumber(invoiceNumber);
+  async findByInvoiceNumber(@Param('invoiceNumber') invoiceNumber: string) {
+    const purchase =
+      await this.purchasesService.findByInvoiceNumber(invoiceNumber);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Factura obtenida exitosamente',
+      data: purchase,
+    };
   }
 
   @Get('customer/:customerId/points')
-  getCustomerPoints(@Param('customerId') customerId: string) {
-    return this.service.getCustomerPoints(customerId);
+  async getCustomerPoints(@Param('customerId') customerId: string) {
+    const points = await this.purchasesService.getCustomerPoints(customerId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Puntos del cliente obtenidos exitosamente',
+      data: { points },
+    };
+  }
+
+  @Get('customer/:customerId/tickets')
+  async getCustomerTickets(
+    @Param('customerId') customerId: string,
+    @Query('raffleId') raffleId?: string,
+  ) {
+    const tickets = await this.purchasesService.getCustomerTickets(
+      customerId,
+      raffleId,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Boletas del cliente obtenidas exitosamente',
+      data: tickets,
+    };
+  }
+
+  @Get('raffle/:raffleId/ticket-stats')
+  async getTicketStats(@Param('raffleId') raffleId: string) {
+    const stats = await this.purchasesService.getTicketStats(raffleId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Estadísticas de boletas obtenidas exitosamente',
+      data: stats,
+    };
+  }
+
+  @Get('customer/:customerId/history')
+  async getCustomerPurchaseHistory(
+    @Param('customerId') customerId: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number = 1,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number = 10,
+  ) {
+    const history = await this.purchasesService.getCustomerPurchaseHistory(
+      customerId,
+      page,
+      limit,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Historial de compras obtenido exitosamente',
+      data: history,
+    };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  async findOne(@Param('id') id: string) {
+    const purchase = await this.purchasesService.findOne(id);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Compra obtenida exitosamente',
+      data: purchase,
+    };
   }
 }

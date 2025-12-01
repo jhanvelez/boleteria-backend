@@ -12,6 +12,7 @@ import {
 import { EstablishmentsService } from './establishments.service';
 import { CreateEstablishmentDto } from './dto/create-establishment.dto';
 import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { Establishment } from './entities/establishment.entity';
 
 @Controller('establishments')
@@ -26,8 +27,8 @@ export class EstablishmentsController {
   }
 
   @Get()
-  findAll(): Promise<Establishment[]> {
-    return this.establishmentsService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.establishmentsService.findAll(query);
   }
 
   @Get('search')

@@ -1,28 +1,33 @@
-import {
-  IsString,
-  IsNumber,
-  IsPositive,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
+import { IsString, IsNumber, IsOptional, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreatePurchaseDto {
   @IsString()
   customerId: string;
 
-  @IsUUID()
   @IsString()
   establishmentId: string;
 
-  @IsUUID()
   @IsString()
   raffleId: string;
 
   @IsNumber()
-  @IsPositive()
+  @Min(1000)
   amount: number;
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   description?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value ? parseFloat(value) : 0))
+  calculatedTickets?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => (value ? parseFloat(value) : 0))
+  remainingBalance?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => (value ? parseFloat(value) : 0))
+  currentCustomerBalance?: number;
 }

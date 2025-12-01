@@ -18,6 +18,7 @@ import { PointsModule } from './points/points.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { PremiseModule } from './premise/premise.module';
+import { TicketsModule } from './tickets/tickets.module';
 
 import * as crypto from 'crypto';
 (global as any).crypto = crypto;
@@ -57,6 +58,7 @@ import * as crypto from 'crypto';
     PointsModule,
     ScheduleModule.forRoot(),
     PremiseModule,
+    TicketsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
