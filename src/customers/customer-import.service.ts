@@ -90,7 +90,7 @@ export class CustomerImportService {
       country: row['pais_c'] ?? row['country'] ?? null,
       identification: documento ? String(documento).replace(/\D/g, '') : null,
       accumulatedValue: acumuladoValue,
-      currentBalance: acumuladoValue,
+      currentBalance: 0,
       raw: row,
       external: true,
     };
