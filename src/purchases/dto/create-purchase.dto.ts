@@ -1,4 +1,10 @@
-import { IsString, IsNumber, IsOptional, Min } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  Min,
+  IsNotEmpty,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreatePurchaseDto {
@@ -18,6 +24,10 @@ export class CreatePurchaseDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  establishmentInvoiceNumber: string;
 
   @IsOptional()
   @Transform(({ value }) => (value ? parseFloat(value) : 0))

@@ -5,11 +5,12 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, DataSource } from 'typeorm';
 import { Purchase } from './entities/purchase.entity';
 import { Point } from '../points/entities/point.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Establishment } from '../establishments/entities/establishment.entity';
+import { EstablishmentInvoiceCounter } from '../establishments/entities/establishment-invoice-counter.entity';
 import { Raffle } from '../raffles/entities/raffle.entity';
 import { Ticket } from 'src/tickets/entities/ticket.entity';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -32,6 +33,9 @@ export class PurchasesService {
     private readonly raffleRepository: Repository<Raffle>,
     @InjectRepository(Ticket)
     private readonly ticketRepository: Repository<Ticket>,
+    @InjectRepository(EstablishmentInvoiceCounter)
+    private readonly invoiceCounterRepository: Repository<EstablishmentInvoiceCounter>,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -59,38 +63,6 @@ export class PurchasesService {
       console.error(error);
       throw new InternalServerErrorException(
         'Error generando número de factura',
-      );
-    }
-  }
-
-  /**
-   * Genera un número de boleta único
-   */
-  private async generateTicketNumber(raffleId: string): Promise<string> {
-    try {
-      const raffle = await this.raffleRepository.findOne({
-        where: { id: raffleId },
-      });
-      const prefix = raffle?.ticketPrefix || 'TK';
-
-      const lastTicket = await this.ticketRepository.findOne({
-        where: { raffleId },
-        order: { createdAt: 'DESC' },
-      });
-
-      let sequence = 1;
-      if (lastTicket?.ticketNumber) {
-        const ticketParts = lastTicket.ticketNumber.split('-');
-        const lastSequence =
-          ticketParts.length > 1 ? parseInt(ticketParts[1], 10) : 0;
-        sequence = isNaN(lastSequence) ? 1 : lastSequence + 1;
-      }
-
-      return `${prefix}-${sequence.toString().padStart(6, '0')}`;
-    } catch (error) {
-      console.error(error);
-      throw new InternalServerErrorException(
-        'Error generando número de boleta',
       );
     }
   }
@@ -124,6 +96,10 @@ export class PurchasesService {
    * Crea una nueva compra con sistema de boletas y puntos
    */
   async create(createPurchaseDto: CreatePurchaseDto): Promise<Purchase> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
       const [customer, establishment, raffle] = await Promise.all([
         this.customerRepository.findOne({
@@ -153,6 +129,21 @@ export class PurchasesService {
         throw new ConflictException('Sorteo no activo');
       }
 
+      // VALIDACIÓN 1: Verificar que el número de factura no exista en el establecimiento
+      const existingInvoice = await this.purchaseRepository.findOne({
+        where: {
+          establishment: { id: establishment.id },
+          establishmentInvoiceNumber:
+            createPurchaseDto.establishmentInvoiceNumber,
+        },
+      });
+
+      if (existingInvoice) {
+        throw new ConflictException(
+          `El número de factura ${createPurchaseDto.establishmentInvoiceNumber} ya existe para el establecimiento ${establishment.nombreComercial}`,
+        );
+      }
+
       const currentBalance = customer.currentBalance || 0;
       const { tickets, remainingBalance } = this.calculateTicketsAndBalance(
         createPurchaseDto.amount,
@@ -162,7 +153,26 @@ export class PurchasesService {
       const points = this.calculatePoints(createPurchaseDto.amount);
       const invoiceNumber = await this.generateInvoiceNumber();
 
-      // Crear la compra
+      // 1. Registrar o actualizar el contador de facturas del establecimiento
+      let counter = await this.invoiceCounterRepository.findOne({
+        where: { establishmentId: establishment.id },
+      });
+
+      if (!counter) {
+        counter = this.invoiceCounterRepository.create({
+          establishment,
+          establishmentId: establishment.id,
+          lastInvoiceNumber: 0,
+          prefix: 'FACT',
+        });
+        counter = await this.invoiceCounterRepository.save(counter);
+      }
+
+      const providedNumber = parseInt(
+        createPurchaseDto.establishmentInvoiceNumber.replace(/\D/g, ''),
+        10,
+      );
+
       const purchase = this.purchaseRepository.create({
         customer,
         establishment,
@@ -171,6 +181,8 @@ export class PurchasesService {
         points,
         description: createPurchaseDto.description,
         invoiceNumber,
+        establishmentInvoiceNumber:
+          createPurchaseDto.establishmentInvoiceNumber,
         status: 'completed',
         purchaseDate: new Date(),
         ticketsGenerated: tickets,
@@ -178,7 +190,15 @@ export class PurchasesService {
         newBalance: remainingBalance,
       });
 
-      const savedPurchase = await this.purchaseRepository.save(purchase);
+      const savedPurchase = await queryRunner.manager.save(purchase);
+
+      if (
+        !isNaN(providedNumber) &&
+        providedNumber > counter.lastInvoiceNumber
+      ) {
+        counter.lastInvoiceNumber = providedNumber;
+        await queryRunner.manager.save(counter);
+      }
 
       // Crear registro de puntos
       const point = this.pointRepository.create({
@@ -188,13 +208,44 @@ export class PurchasesService {
         purchase: savedPurchase,
       });
 
-      await this.pointRepository.save(point);
+      await queryRunner.manager.save(point);
 
-      // Crear boletas si las hay
+      // =============================================
+      // =========== FIX SECUENCIA DE TICKETS =========
+      // =============================================
+
       if (tickets > 0) {
+        // Obtener último ticket **ordenado por el número real**
+        const lastTicket = await this.ticketRepository
+          .createQueryBuilder('ticket')
+          .where('ticket.raffleId = :raffleId', { raffleId: raffle.id })
+          .orderBy(
+            `CAST(SPLIT_PART(ticket.ticketNumber, '-', 2) AS INTEGER)`,
+            'DESC',
+          )
+          .getOne();
+
+        let nextTicketNumber = 12720;
+
+        if (lastTicket?.ticketNumber) {
+          const parts = lastTicket.ticketNumber.split('-');
+          if (parts.length > 1) {
+            const lastNum = parseInt(parts[1], 10);
+            if (!isNaN(lastNum) && lastNum >= 12720) {
+              nextTicketNumber = lastNum + 1;
+            }
+          }
+        }
+
         const ticketPromises = [];
+
         for (let i = 0; i < tickets; i++) {
-          const ticketNumber = await this.generateTicketNumber(raffle.id);
+          const ticketNumber = `${raffle.ticketPrefix || 'BOL'}-${(
+            nextTicketNumber + i
+          )
+            .toString()
+            .padStart(6, '0')}`;
+
           const ticket = this.ticketRepository.create({
             ticketNumber,
             customer,
@@ -203,19 +254,23 @@ export class PurchasesService {
             amountUsed: this.PRICE_PER_TICKET,
             status: 'active',
           });
-          ticketPromises.push(this.ticketRepository.save(ticket));
+
+          ticketPromises.push(queryRunner.manager.save(ticket));
         }
+
         await Promise.all(ticketPromises);
       }
 
-      // Actualizar saldo del cliente
-      await this.customerRepository.update(customer.id, {
+      await queryRunner.manager.update(Customer, customer.id, {
         currentBalance: remainingBalance,
         updatedAt: new Date(),
       });
 
+      await queryRunner.commitTransaction();
       return savedPurchase;
     } catch (error) {
+      await queryRunner.rollbackTransaction();
+      console.log(error);
       if (
         error instanceof NotFoundException ||
         error instanceof ConflictException
@@ -223,6 +278,8 @@ export class PurchasesService {
         throw error;
       }
       throw new InternalServerErrorException('Error creando la compra');
+    } finally {
+      await queryRunner.release();
     }
   }
 

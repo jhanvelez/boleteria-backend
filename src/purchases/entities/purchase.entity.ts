@@ -41,6 +41,9 @@ export class Purchase {
   @Column({ unique: true })
   invoiceNumber: string;
 
+  @Column({ nullable: true })
+  establishmentInvoiceNumber: string;
+
   @Column({ default: 'completed' })
   status: 'pending' | 'completed' | 'cancelled';
 

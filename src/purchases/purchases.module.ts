@@ -6,6 +6,7 @@ import { Purchase } from './entities/purchase.entity';
 import { Point } from '../points/entities/point.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Establishment } from '../establishments/entities/establishment.entity';
+import { EstablishmentInvoiceCounter } from '../establishments/entities/establishment-invoice-counter.entity';
 import { Raffle } from '../raffles/entities/raffle.entity';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TicketsModule } from '../tickets/tickets.module';
@@ -19,6 +20,7 @@ import { TicketsModule } from '../tickets/tickets.module';
       Establishment,
       Raffle,
       Ticket,
+      EstablishmentInvoiceCounter,
     ]),
     TicketsModule,
   ],
