@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, DataSource, In } from 'typeorm';
@@ -39,9 +40,9 @@ export class PurchasesService {
   ) {}
 
   /**
-   * Genera un número de factura único
+   * Genera números de factura consecutivos de manera masiva
    */
-  private async generateInvoiceNumber(): Promise<string> {
+  private async generateInvoiceNumbers(count: number): Promise<string[]> {
     try {
       const year = new Date().getFullYear();
       const lastInvoice = await this.purchaseRepository.findOne({
@@ -58,11 +59,13 @@ export class PurchasesService {
         sequence = isNaN(lastSequence) ? 1 : lastSequence + 1;
       }
 
-      return `${year}-${sequence.toString().padStart(6, '0')}`;
+      return Array.from({ length: count }, (_, i) => 
+        `${year}-${(sequence + i).toString().padStart(6, '0')}`
+      );
     } catch (error) {
       console.error(error);
       throw new InternalServerErrorException(
-        'Error generando número de factura',
+        'Error generando números de factura',
       );
     }
   }
@@ -75,127 +78,105 @@ export class PurchasesService {
   }
 
   /**
-   * Calcula boletas y saldo basado en el monto y saldo anterior
-   */
-  private calculateTicketsAndBalance(
-    amount: number,
-    currentBalance: number = 0,
-  ): {
-    tickets: number;
-    remainingBalance: number;
-    totalAmount: number;
-  } {
-    const totalAmount = amount + currentBalance;
-    const tickets = Math.floor(totalAmount / this.PRICE_PER_TICKET);
-    const remainingBalance = totalAmount % this.PRICE_PER_TICKET;
-
-    return { tickets, remainingBalance, totalAmount };
-  }
-
-  /**
-   * Crea una o múltiples compras con sistema de boletas y puntos
+   * Valida y procesa compras masivas optimizado
    */
   async create(dto: CreatePurchaseDto | CreatePurchaseDto[]) {
     const isArray = Array.isArray(dto);
     const purchasesData = isArray ? dto : [dto];
+
+    if (purchasesData.length === 0) {
+      throw new BadRequestException('No se recibieron compras para procesar');
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      /** ============================================================
-       * 1. Cargar clientes – establecimientos – sorteos EN BLOQUE
-       * ============================================================ */
       const customerIds = [...new Set(purchasesData.map(p => p.customerId))];
       const establishmentIds = [...new Set(purchasesData.map(p => p.establishmentId))];
       const raffleIds = [...new Set(purchasesData.map(p => p.raffleId))];
 
       const [customers, establishments, raffles] = await Promise.all([
-        this.customerRepository.findBy({ id: In(customerIds) }),
-        this.establishmentRepository.findBy({ id: In(establishmentIds) }),
-        this.raffleRepository.findBy({ id: In(raffleIds) }),
+        this.customerRepository.find({
+          where: { id: In(customerIds) },
+          select: ['id', 'currentBalance'],
+        }),
+        this.establishmentRepository.find({
+          where: { id: In(establishmentIds) },
+          select: ['id'],
+        }),
+        this.raffleRepository.find({
+          where: { id: In(raffleIds) },
+          select: ['id', 'ticketPrefix'],
+        }),
       ]);
 
       const customersMap = new Map(customers.map(c => [c.id, c]));
       const establishmentsMap = new Map(establishments.map(e => [e.id, e]));
       const rafflesMap = new Map(raffles.map(r => [r.id, r]));
 
-      /** ============================================================
-       * 2. Validar facturas duplicadas EN BLOQUE
-       * ============================================================ */
-      const invoicePairs = purchasesData.map(p => ({
-        establishmentId: p.establishmentId,
-        establishmentInvoiceNumber: p.establishmentInvoiceNumber,
-      }));
-
-      const existing = await this.purchaseRepository.find({
-        where: {
-          establishmentInvoiceNumber: In(invoicePairs.map(i => i.establishmentInvoiceNumber)),
-          establishment: { id: In(establishmentIds) },
-        },
-        relations: ['establishment'],
+      const missing: string[] = [];
+      purchasesData.forEach((p, i) => {
+        if (!customersMap.has(p.customerId)) missing.push(`Cliente en compra #${i + 1}`);
+        if (!establishmentsMap.has(p.establishmentId)) missing.push(`Establecimiento en compra #${i + 1}`);
+        if (!rafflesMap.has(p.raffleId)) missing.push(`Sorteo en compra #${i + 1}`);
       });
 
+      if (missing.length > 0) {
+        throw new NotFoundException('Entidades faltantes: ' + missing.join(', '));
+      }
+
+      // Buscar facturas ya existentes
+      const existing = await this.purchaseRepository
+        .createQueryBuilder('p')
+        .select(['p.establishmentInvoiceNumber', 'p.establishmentId'])
+        .where('p.establishmentId IN (:...eids)', { eids: establishmentIds })
+        .andWhere('p.establishmentInvoiceNumber IN (:...nums)', {
+          nums: purchasesData.map(p => p.establishmentInvoiceNumber),
+        })
+        .getMany();
+
       if (existing.length > 0) {
-        throw new ConflictException(
-          `Factura duplicada: ${existing[0].establishmentInvoiceNumber} en ${existing[0].establishment.nombreComercial}`
-        );
+        throw new ConflictException(`Factura duplicada: ${existing[0].establishmentInvoiceNumber}`);
       }
 
-      /** ============================================================
-       * 3. Generar números de factura usando SECUENCIA SQL
-       * ============================================================ */
-      const invoiceNumbers = [];
-      for (let i = 0; i < purchasesData.length; i++) {
-        const seq = await queryRunner.manager.query(`SELECT nextval('invoice_seq')`);
-        const num = String(seq[0].nextval).padStart(6, '0');
-        invoiceNumbers.push(`${new Date().getFullYear()}-${num}`);
-      }
+      // Generar números consecutivos internos
+      const invoiceNumbers = await this.generateInvoiceNumbers(purchasesData.length);
 
-      /** ============================================================
-       * 4. Preparar inserts masivos
-       * ============================================================ */
-      const purchasesToInsert = [];
-      const pointsToInsert = [];
-      const ticketsToInsert = [];
-
-      // precargar último ticket
+      // Cargar último ticket solo 1 vez
       const lastTicket = await this.ticketRepository
         .createQueryBuilder('t')
         .orderBy(`CAST(SPLIT_PART(t.ticketNumber, '-', 2) AS INTEGER)`, 'DESC')
         .getOne();
 
-      let nextTicketNumber = lastTicket
-        ? parseInt(lastTicket.ticketNumber.split('-')[1], 10)
+      let nextTicket = lastTicket
+        ? parseInt(lastTicket.ticketNumber.split('-')[1])
         : 12720;
 
-      for (let i = 0; i < purchasesData.length; i++) {
-        const p = purchasesData[i];
+      const purchasesToInsert = [];
+      const pointsToInsert = [];
+      const ticketsToInsert = [];
+      const customersToUpdate = [];
 
+      purchasesData.forEach((p, idx) => {
         const customer = customersMap.get(p.customerId);
-        const establishment = establishmentsMap.get(p.establishmentId);
         const raffle = rafflesMap.get(p.raffleId);
 
-        if (!customer || !establishment || !raffle) {
-          throw new NotFoundException('Entidad relacionada no encontrada');
-        }
-
         const prevBalance = customer.currentBalance || 0;
-        const total = p.amount + prevBalance;
+        const total = prevBalance + p.amount;
 
         const tickets = Math.floor(total / this.PRICE_PER_TICKET);
         const newBalance = total % this.PRICE_PER_TICKET;
         const points = Math.floor(p.amount / 1000);
 
-        // crear purchase para insert masivo
         purchasesToInsert.push({
           customerId: customer.id,
-          establishmentId: establishment.id,
+          establishmentId: p.establishmentId,
           raffleId: raffle.id,
           amount: p.amount,
           points,
-          invoiceNumber: invoiceNumbers[i],
+          invoiceNumber: invoiceNumbers[idx],
           establishmentInvoiceNumber: p.establishmentInvoiceNumber,
           ticketsGenerated: tickets,
           previousBalance: prevBalance,
@@ -204,58 +185,85 @@ export class PurchasesService {
           status: 'completed',
         });
 
-        // registrar puntos
         pointsToInsert.push({
           customerId: customer.id,
-          purchaseId: undefined,
-          points,
           purchaseAmount: p.amount,
+          points,
+          createdAt: new Date(),
         });
 
-        // preparar tickets masivos
-        if (tickets > 0) {
-          for (let j = 0; j < tickets; j++) {
-            nextTicketNumber++;
-
-            ticketsToInsert.push({
-              customerId: customer.id,
-              raffleId: raffle.id,
-              ticketNumber: `${raffle.ticketPrefix || 'BOL'}-${String(nextTicketNumber).padStart(6, '0')}`,
-              amountUsed: this.PRICE_PER_TICKET,
-              status: 'active',
-            });
-          }
+        for (let j = 0; j < tickets; j++) {
+          nextTicket++;
+          ticketsToInsert.push({
+            customerId: customer.id,
+            raffleId: raffle.id,
+            ticketNumber: `${raffle.ticketPrefix || 'BOL'}-${String(nextTicket).padStart(6, '0')}`,
+            amountUsed: this.PRICE_PER_TICKET,
+            status: 'active',
+            createdAt: new Date(),
+          });
         }
 
-        // actualizar balance en memoria
         customer.currentBalance = newBalance;
-      }
-
-      /** ============================================================
-       * 5. INSERT masivo (1 query por tabla)
-       * ============================================================ */
-      const purchasedInsertResult = await queryRunner.manager.insert(Purchase, purchasesToInsert);
-
-      // mapear IDs retornados a los puntos
-      purchasedInsertResult.identifiers.forEach((row, idx) => {
-        pointsToInsert[idx].purchaseId = row.id;
+        customersToUpdate.push(customer);
       });
 
-      await queryRunner.manager.insert(Point, pointsToInsert);
+      const insertedPurchases = await queryRunner.manager
+        .createQueryBuilder()
+        .insert()
+        .into(Purchase)
+        .values(purchasesToInsert)
+        .returning(['id', 'invoiceNumber'])
+        .execute();
+
+      const map = new Map(
+        insertedPurchases.raw.map(r => [r.invoiceNumber, r.id]),
+      );
+
+      pointsToInsert.forEach((pt, i) => {
+        pt.purchaseId = map.get(invoiceNumbers[i]);
+      });
+
+      if (pointsToInsert.length > 0) {
+        await queryRunner.manager.insert(Point, pointsToInsert);
+      }
+
+      // asignar purchaseId a tickets proporcional
+      let ticketIndex = 0;
+      purchasesData.forEach((_, i) => {
+        const pid = map.get(invoiceNumbers[i]);
+        const ticketsCount =
+          purchasesToInsert[i].ticketsGenerated || 0;
+        for (let j = 0; j < ticketsCount; j++) {
+          ticketsToInsert[ticketIndex].purchaseId = pid;
+          ticketIndex++;
+        }
+      });
 
       if (ticketsToInsert.length > 0) {
         await queryRunner.manager.insert(Ticket, ticketsToInsert);
       }
 
-      // guardar balances
-      await queryRunner.manager.save(Customer, Array.from(customersMap.values()));
+      await queryRunner.manager.save(Customer, customersToUpdate);
 
       await queryRunner.commitTransaction();
 
-      return isArray ? purchasesToInsert : purchasesToInsert[0];
-    } catch (e) {
+      // 🔥 RESPUESTA OPTIMIZADA
+      if (isArray) {
+        return {
+          message: 'Compras procesadas exitosamente',
+          count: purchasesData.length,
+        };
+      }
+
+      // Si solo es una compra, devolver la compra cargada
+      return {
+        id: insertedPurchases.raw[0].id,
+        invoiceNumber: insertedPurchases.raw[0].invoiceNumber,
+      };
+    } catch (error) {
       await queryRunner.rollbackTransaction();
-      throw e;
+      throw error;
     } finally {
       await queryRunner.release();
     }
@@ -377,6 +385,40 @@ export class PurchasesService {
         throw error;
       }
       throw new InternalServerErrorException('Error obteniendo la factura');
+    }
+  }
+
+  /**
+   * Obtiene estadísticas de compras procesadas
+   */
+  async getProcessedStats(): Promise<{
+    totalProcessed: number;
+    totalAmount: number;
+    totalTickets: number;
+    totalPoints: number;
+  }> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const result = await this.purchaseRepository
+        .createQueryBuilder('purchase')
+        .select('COUNT(purchase.id)', 'totalProcessed')
+        .addSelect('SUM(purchase.amount)', 'totalAmount')
+        .addSelect('SUM(purchase.ticketsGenerated)', 'totalTickets')
+        .addSelect('SUM(purchase.points)', 'totalPoints')
+        .where('purchase.createdAt >= :today', { today })
+        .getRawOne();
+
+      return {
+        totalProcessed: parseInt(result.totalProcessed, 10) || 0,
+        totalAmount: parseFloat(result.totalAmount) || 0,
+        totalTickets: parseInt(result.totalTickets, 10) || 0,
+        totalPoints: parseInt(result.totalPoints, 10) || 0,
+      };
+    } catch (error) {
+      console.error(error);
+      throw new InternalServerErrorException('Error obteniendo estadísticas de procesamiento');
     }
   }
 
