@@ -142,12 +142,10 @@ export class PurchasesService {
         );
       }
 
-      // Consecutivos internos
       const invoiceNumbers = await this.generateInvoiceNumbers(
         purchasesData.length,
       );
 
-      // Último ticket
       const lastTicket = await this.ticketRepository
         .createQueryBuilder('t')
         .orderBy(`CAST(SPLIT_PART(t.ticketNumber, '-', 2) AS INTEGER)`, 'DESC')
@@ -162,13 +160,18 @@ export class PurchasesService {
       const ticketsToInsert = [];
       const customersToUpdate = [];
 
+      // ============================================================
+      // CAMBIO CLAVE: Calcular correctamente el balance del cliente
+      // ============================================================
       purchasesData.forEach((p, idx) => {
         const customer = customersMap.get(p.customerId);
         const raffle = rafflesMap.get(p.raffleId);
 
+        // Usar el balance actual del cliente (no del DTO)
         const prevBalance = customer.currentBalance || 0;
         const total = prevBalance + p.amount;
 
+        // Calcular tickets y nuevo balance
         const tickets = Math.floor(total / this.PRICE_PER_TICKET);
         const newBalance = total % this.PRICE_PER_TICKET;
         const points = Math.floor(p.amount / 1000);
@@ -207,8 +210,15 @@ export class PurchasesService {
           });
         }
 
+        // ============================================================
+        // CAMBIO CLAVE: Actualizar el balance en la entidad del mapa
+        // ============================================================
         customer.currentBalance = newBalance;
-        customersToUpdate.push(customer);
+        
+        // Solo agregar al array si no está ya incluido
+        if (!customersToUpdate.some(c => c.id === customer.id)) {
+          customersToUpdate.push(customer);
+        }
       });
 
       const insertedPurchases = await queryRunner.manager
@@ -218,20 +228,6 @@ export class PurchasesService {
         .values(purchasesToInsert)
         .returning(['id', 'invoiceNumber'])
         .execute();
-
-      const customerId = purchasesData[0].customerId;
-
-      const customer = await this.customerRepository.findOne({
-        where: { id: customerId },
-      });
-
-      if (!customer) {
-        throw new Error(`No se encontró el cliente con id: ${customerId}`);
-      }
-
-      customer.currentBalance = purchasesData[0].remainingBalance;
-
-      await this.customerRepository.save(customer);
 
       const map = new Map(
         insertedPurchases.raw.map((r) => [r.invoiceNumber, r.id]),
@@ -259,24 +255,57 @@ export class PurchasesService {
         await queryRunner.manager.insert(Ticket, ticketsToInsert);
       }
 
-      await queryRunner.manager.save(Customer, customersToUpdate);
+      // ============================================================
+      // CAMBIO CLAVE: Actualizar clientes DENTRO de la transacción
+      // ============================================================
+      if (customersToUpdate.length > 0) {
+        // Usar el repositorio del queryRunner, no el repositorio global
+        await queryRunner.manager.save(Customer, customersToUpdate);
+        
+        // Verificación de depuración
+        console.log('Clientes actualizados:', customersToUpdate.map(c => ({
+          id: c.id,
+          newBalance: c.currentBalance
+        })));
+      }
 
       await queryRunner.commitTransaction();
+
+      // ============================================================
+      // CAMBIO CLAVE: Verificar que se actualizó después del commit
+      // ============================================================
+      if (customerIds.length === 1) {
+        const customerId = customerIds[0];
+        const updatedCustomer = await this.customerRepository.findOne({
+          where: { id: customerId },
+          select: ['id', 'currentBalance']
+        });
+        
+        console.log('Balance después del commit:', {
+          customerId,
+          currentBalance: updatedCustomer?.currentBalance
+        });
+      }
 
       // Respuesta final
       if (Array.isArray(dto)) {
         return {
+          success: true,
           message: 'Compras procesadas exitosamente',
           count: purchasesData.length,
+          newBalance: customersMap.get(customerIds[0])?.currentBalance || 0
         };
       }
 
       return {
+        success: true,
         id: insertedPurchases.raw[0].id,
         invoiceNumber: insertedPurchases.raw[0].invoiceNumber,
+        newBalance: customersMap.get(customerIds[0])?.currentBalance || 0
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();
+      console.error('Error en creación de compra:', error);
       throw error;
     } finally {
       await queryRunner.release();
