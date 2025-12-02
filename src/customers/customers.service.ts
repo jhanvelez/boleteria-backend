@@ -134,8 +134,20 @@ export class CustomersService {
         raw: item,
       };
 
-      // upsert: save with primary key id -> insert or update
       try {
+        if (mapped.identification) {
+          const exists = await this.repo.findOne({
+            where: { identification: mapped.identification },
+          });
+
+          if (exists) {
+            this.logger.log(
+              `Documento ${mapped.identification} ya existe, no se inserta.`,
+            );
+            continue;
+          }
+        }
+
         await this.repo.save(mapped as Customer);
         imported++;
       } catch (err) {
