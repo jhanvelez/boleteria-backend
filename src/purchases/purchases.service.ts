@@ -81,22 +81,23 @@ export class PurchasesService {
    * Valida y procesa compras masivas optimizado
    */
   async create(dto: CreatePurchaseDto | CreatePurchaseDto[]) {
-    const isArray = Array.isArray(dto);
-    const purchasesData = isArray ? dto : [dto];
+    const purchasesData = Array.isArray(dto) ? dto : [dto];
 
     if (purchasesData.length === 0) {
       throw new BadRequestException('No se recibieron compras para procesar');
     }
+
+    // Extraer TODOS los IDs correctamente
+    const customerIds = [...new Set(purchasesData.map(p => p.customerId))];
+    const establishmentIds = [...new Set(purchasesData.map(p => p.establishmentId))];
+    const raffleIds = [...new Set(purchasesData.map(p => p.raffleId))];
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const customerIds = [...new Set(purchasesData.map(p => p.customerId))];
-      const establishmentIds = [...new Set(purchasesData.map(p => p.establishmentId))];
-      const raffleIds = [...new Set(purchasesData.map(p => p.raffleId))];
-
+      // Cargar entidades requeridas
       const [customers, establishments, raffles] = await Promise.all([
         this.customerRepository.find({
           where: { id: In(customerIds) },
@@ -116,6 +117,7 @@ export class PurchasesService {
       const establishmentsMap = new Map(establishments.map(e => [e.id, e]));
       const rafflesMap = new Map(raffles.map(r => [r.id, r]));
 
+      // Validación de existencia
       const missing: string[] = [];
       purchasesData.forEach((p, i) => {
         if (!customersMap.has(p.customerId)) missing.push(`Cliente en compra #${i + 1}`);
@@ -127,7 +129,7 @@ export class PurchasesService {
         throw new NotFoundException('Entidades faltantes: ' + missing.join(', '));
       }
 
-      // Buscar facturas ya existentes
+      // Validación facturas repetidas
       const existing = await this.purchaseRepository
         .createQueryBuilder('p')
         .select(['p.establishmentInvoiceNumber', 'p.establishmentId'])
@@ -141,10 +143,10 @@ export class PurchasesService {
         throw new ConflictException(`Factura duplicada: ${existing[0].establishmentInvoiceNumber}`);
       }
 
-      // Generar números consecutivos internos
+      // Consecutivos internos
       const invoiceNumbers = await this.generateInvoiceNumbers(purchasesData.length);
 
-      // Cargar último ticket solo 1 vez
+      // Último ticket
       const lastTicket = await this.ticketRepository
         .createQueryBuilder('t')
         .orderBy(`CAST(SPLIT_PART(t.ticketNumber, '-', 2) AS INTEGER)`, 'DESC')
@@ -220,6 +222,7 @@ export class PurchasesService {
         insertedPurchases.raw.map(r => [r.invoiceNumber, r.id]),
       );
 
+      // Insertar puntos
       pointsToInsert.forEach((pt, i) => {
         pt.purchaseId = map.get(invoiceNumbers[i]);
       });
@@ -228,12 +231,11 @@ export class PurchasesService {
         await queryRunner.manager.insert(Point, pointsToInsert);
       }
 
-      // asignar purchaseId a tickets proporcional
+      // Asignar purchaseId a tickets
       let ticketIndex = 0;
       purchasesData.forEach((_, i) => {
         const pid = map.get(invoiceNumbers[i]);
-        const ticketsCount =
-          purchasesToInsert[i].ticketsGenerated || 0;
+        const ticketsCount = purchasesToInsert[i].ticketsGenerated || 0;
         for (let j = 0; j < ticketsCount; j++) {
           ticketsToInsert[ticketIndex].purchaseId = pid;
           ticketIndex++;
@@ -248,19 +250,19 @@ export class PurchasesService {
 
       await queryRunner.commitTransaction();
 
-      // 🔥 RESPUESTA OPTIMIZADA
-      if (isArray) {
+      // Respuesta final
+      if (Array.isArray(dto)) {
         return {
           message: 'Compras procesadas exitosamente',
           count: purchasesData.length,
         };
       }
 
-      // Si solo es una compra, devolver la compra cargada
       return {
         id: insertedPurchases.raw[0].id,
         invoiceNumber: insertedPurchases.raw[0].invoiceNumber,
       };
+
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

@@ -17,16 +17,25 @@ export class Purchase {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column()
+  customerId: string;
+
   @ManyToOne(() => Customer, { eager: true })
-  @JoinColumn()
+  @JoinColumn({ name: 'customerId' })
   customer: Customer;
 
+  @Column()
+  establishmentId: string;
+
   @ManyToOne(() => Establishment, { eager: true })
-  @JoinColumn()
+  @JoinColumn({ name: 'establishmentId' })
   establishment: Establishment;
 
+  @Column()
+  raffleId: string;
+
   @ManyToOne(() => Raffle, { eager: true })
-  @JoinColumn()
+  @JoinColumn({ name: 'raffleId' })
   raffle: Raffle;
 
   @Column('decimal', { precision: 10, scale: 2 })
