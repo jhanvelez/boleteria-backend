@@ -124,6 +124,7 @@ export class CustomersService {
         phone: item.others?.phone || null,
         organization: item.others?.organization || null,
         postalCode: item.others?.postalCode || null,
+        identification: item.Documento,
         city: item.others?.city || null,
         state: item.others?.state || null,
         country: item.others?.country || null,
