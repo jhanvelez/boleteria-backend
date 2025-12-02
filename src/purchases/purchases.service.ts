@@ -59,8 +59,9 @@ export class PurchasesService {
         sequence = isNaN(lastSequence) ? 1 : lastSequence + 1;
       }
 
-      return Array.from({ length: count }, (_, i) => 
-        `${year}-${(sequence + i).toString().padStart(6, '0')}`
+      return Array.from(
+        { length: count },
+        (_, i) => `${year}-${(sequence + i).toString().padStart(6, '0')}`,
       );
     } catch (error) {
       console.error(error);
@@ -68,13 +69,6 @@ export class PurchasesService {
         'Error generando números de factura',
       );
     }
-  }
-
-  /**
-   * Calcula puntos basado en el monto (1 punto por cada $1,000 COP)
-   */
-  private calculatePoints(amount: number): number {
-    return Math.floor(amount / 1000);
   }
 
   /**
@@ -87,17 +81,17 @@ export class PurchasesService {
       throw new BadRequestException('No se recibieron compras para procesar');
     }
 
-    // Extraer TODOS los IDs correctamente
-    const customerIds = [...new Set(purchasesData.map(p => p.customerId))];
-    const establishmentIds = [...new Set(purchasesData.map(p => p.establishmentId))];
-    const raffleIds = [...new Set(purchasesData.map(p => p.raffleId))];
+    const customerIds = [...new Set(purchasesData.map((p) => p.customerId))];
+    const establishmentIds = [
+      ...new Set(purchasesData.map((p) => p.establishmentId)),
+    ];
+    const raffleIds = [...new Set(purchasesData.map((p) => p.raffleId))];
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // Cargar entidades requeridas
       const [customers, establishments, raffles] = await Promise.all([
         this.customerRepository.find({
           where: { id: In(customerIds) },
@@ -113,38 +107,45 @@ export class PurchasesService {
         }),
       ]);
 
-      const customersMap = new Map(customers.map(c => [c.id, c]));
-      const establishmentsMap = new Map(establishments.map(e => [e.id, e]));
-      const rafflesMap = new Map(raffles.map(r => [r.id, r]));
+      const customersMap = new Map(customers.map((c) => [c.id, c]));
+      const establishmentsMap = new Map(establishments.map((e) => [e.id, e]));
+      const rafflesMap = new Map(raffles.map((r) => [r.id, r]));
 
-      // Validación de existencia
       const missing: string[] = [];
       purchasesData.forEach((p, i) => {
-        if (!customersMap.has(p.customerId)) missing.push(`Cliente en compra #${i + 1}`);
-        if (!establishmentsMap.has(p.establishmentId)) missing.push(`Establecimiento en compra #${i + 1}`);
-        if (!rafflesMap.has(p.raffleId)) missing.push(`Sorteo en compra #${i + 1}`);
+        if (!customersMap.has(p.customerId))
+          missing.push(`Cliente en compra #${i + 1}`);
+        if (!establishmentsMap.has(p.establishmentId))
+          missing.push(`Establecimiento en compra #${i + 1}`);
+        if (!rafflesMap.has(p.raffleId))
+          missing.push(`Sorteo en compra #${i + 1}`);
       });
 
       if (missing.length > 0) {
-        throw new NotFoundException('Entidades faltantes: ' + missing.join(', '));
+        throw new NotFoundException(
+          'Entidades faltantes: ' + missing.join(', '),
+        );
       }
 
-      // Validación facturas repetidas
       const existing = await this.purchaseRepository
         .createQueryBuilder('p')
         .select(['p.establishmentInvoiceNumber', 'p.establishmentId'])
         .where('p.establishmentId IN (:...eids)', { eids: establishmentIds })
         .andWhere('p.establishmentInvoiceNumber IN (:...nums)', {
-          nums: purchasesData.map(p => p.establishmentInvoiceNumber),
+          nums: purchasesData.map((p) => p.establishmentInvoiceNumber),
         })
         .getMany();
 
       if (existing.length > 0) {
-        throw new ConflictException(`Factura duplicada: ${existing[0].establishmentInvoiceNumber}`);
+        throw new ConflictException(
+          `Factura duplicada: ${existing[0].establishmentInvoiceNumber}`,
+        );
       }
 
       // Consecutivos internos
-      const invoiceNumbers = await this.generateInvoiceNumbers(purchasesData.length);
+      const invoiceNumbers = await this.generateInvoiceNumbers(
+        purchasesData.length,
+      );
 
       // Último ticket
       const lastTicket = await this.ticketRepository
@@ -218,11 +219,24 @@ export class PurchasesService {
         .returning(['id', 'invoiceNumber'])
         .execute();
 
+      const customerId = purchasesData[0].customerId;
+
+      const customer = await this.customerRepository.findOne({
+        where: { id: customerId },
+      });
+
+      if (!customer) {
+        throw new Error(`No se encontró el cliente con id: ${customerId}`);
+      }
+
+      customer.currentBalance = purchasesData[0].remainingBalance;
+
+      await this.customerRepository.save(customer);
+
       const map = new Map(
-        insertedPurchases.raw.map(r => [r.invoiceNumber, r.id]),
+        insertedPurchases.raw.map((r) => [r.invoiceNumber, r.id]),
       );
 
-      // Insertar puntos
       pointsToInsert.forEach((pt, i) => {
         pt.purchaseId = map.get(invoiceNumbers[i]);
       });
@@ -231,7 +245,6 @@ export class PurchasesService {
         await queryRunner.manager.insert(Point, pointsToInsert);
       }
 
-      // Asignar purchaseId a tickets
       let ticketIndex = 0;
       purchasesData.forEach((_, i) => {
         const pid = map.get(invoiceNumbers[i]);
@@ -262,7 +275,6 @@ export class PurchasesService {
         id: insertedPurchases.raw[0].id,
         invoiceNumber: insertedPurchases.raw[0].invoiceNumber,
       };
-
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -420,7 +432,9 @@ export class PurchasesService {
       };
     } catch (error) {
       console.error(error);
-      throw new InternalServerErrorException('Error obteniendo estadísticas de procesamiento');
+      throw new InternalServerErrorException(
+        'Error obteniendo estadísticas de procesamiento',
+      );
     }
   }
 
