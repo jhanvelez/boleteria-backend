@@ -5,6 +5,12 @@ import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import { Customer } from 'src/customers/entities/customer.entity';
 
+interface InvoiceRow {
+  identificacion_c: string;
+  'Valor de factura': any;
+  [key: string]: any;
+}
+
 @Injectable()
 export class CustomerImportService {
   private logger = new Logger('CustomerImportService');
@@ -19,26 +25,21 @@ export class CustomerImportService {
     if (val === null || val === undefined || val === '') return 0;
     let s = String(val).trim();
 
-    // si viene con $ y espacios
     s = s.replace(/\$/g, '').trim();
 
-    // si es algo como '100.000.000.000' (puntos como miles) -> quitarlos
-    // si tiene coma decimal '1.234,56' -> convertir a 1234.56
-    // heurística simple:
     if (s.includes(',') && s.includes('.')) {
-      // formato europeo "1.234,56"
       s = s.replace(/\./g, '').replace(',', '.');
     } else if (s.includes('.') && !s.includes(',')) {
-      // "100.000.000" -> eliminar puntos
-      s = s.replace(/\./g, '');
+      // Verificar si es formato con puntos como miles (150.000.000.000)
+      const parts = s.split('.');
+      if (parts.length > 2) {
+        s = s.replace(/\./g, '');
+      }
     } else if (s.includes(',') && !s.includes('.')) {
-      // "1234,56" -> cambiar coma por punto
       s = s.replace(',', '.');
     }
 
-    // eliminar otros caracteres no numéricos salvo el punto
     s = s.replace(/[^\d.-]/g, '');
-
     const n = parseFloat(s);
     return Number.isNaN(n) ? 0 : n;
   }
@@ -50,8 +51,12 @@ export class CustomerImportService {
     return null;
   }
 
+  private normalizeIdentification(ident: any): string {
+    if (!ident) return null;
+    return String(ident).replace(/\D/g, '').trim();
+  }
+
   private transformRowToCustomer(row: any): Partial<Customer> {
-    // Mapear nombres de columnas de tu Excel -> propiedades
     const uid = row['uid'] ?? row['id'] ?? null;
     const documento =
       row['Documento'] ?? row['Documento'] ?? row['documento'] ?? null;
@@ -90,7 +95,7 @@ export class CustomerImportService {
       country: row['pais_c'] ?? row['country'] ?? null,
       identification: documento ? String(documento).replace(/\D/g, '') : null,
       accumulatedValue: acumuladoValue,
-      currentBalance: 0,
+      currentBalance: acumuladoValue, // Inicialmente el balance es igual al acumulado
       raw: row,
       external: true,
     };
@@ -155,11 +160,130 @@ export class CustomerImportService {
 
     for (const b of toUpsertBatches) {
       await this.customerRepo.upsert(b as any[], ['id']);
-
       processed += b.length;
       this.logger.log(`Upserted batch: ${processed}/${rows.length}`);
     }
 
     return { totalRows: rows.length, processed };
+  }
+
+  /**
+   * Procesa un archivo de facturas y actualiza el balance de los clientes
+   * Por cada factura, resta del accumulatedValue y actualiza currentBalance
+   */
+  async processInvoicesFile(
+    filePath: string,
+    dryRun: boolean = false,
+  ): Promise<any> {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Archivo no encontrado: ${filePath}`);
+    }
+
+    this.logger.log(`Procesando archivo de facturas: ${filePath}`);
+
+    // Leer el archivo Excel
+    const workbook = XLSX.readFile(filePath, { raw: false });
+    const sheetName = workbook.SheetNames[0];
+    const rows: InvoiceRow[] = XLSX.utils.sheet_to_json(
+      workbook.Sheets[sheetName],
+      {
+        defval: null,
+      },
+    );
+
+    this.logger.log(`Facturas detectadas: ${rows.length}`);
+
+    const processedInvoices = [];
+    const customersUpdated = new Set<string>();
+    let invoicesProcessed = 0;
+    let invoicesSkipped = 0;
+
+    for (const row of rows) {
+      const identification = this.normalizeIdentification(row.identificacion_c);
+
+      if (!identification) {
+        this.logger.warn(`Factura sin identificación: ${JSON.stringify(row)}`);
+        invoicesSkipped++;
+        continue;
+      }
+
+      const invoiceValue = this.cleanNumber(row['Valor de factura']);
+
+      if (invoiceValue <= 0) {
+        this.logger.warn(
+          `Factura con valor cero o negativo: ${JSON.stringify(row)}`,
+        );
+        invoicesSkipped++;
+        continue;
+      }
+
+      // Buscar el cliente por identificación
+      const customer = await this.customerRepo.findOne({
+        where: { identification },
+      });
+
+      if (!customer) {
+        this.logger.warn(
+          `Cliente no encontrado con identificación: ${identification}`,
+        );
+        processedInvoices.push({
+          identification,
+          invoiceValue,
+          status: 'CLIENT_NOT_FOUND',
+          oldBalance: null,
+          newBalance: null,
+        });
+        invoicesSkipped++;
+        continue;
+      }
+
+      // Calcular nuevo balance
+      const oldBalance = customer.currentBalance;
+      const newBalance = Math.max(0, oldBalance - invoiceValue);
+
+      if (!dryRun) {
+        // Actualizar el cliente
+        customer.currentBalance = newBalance;
+        await this.customerRepo.save(customer);
+      }
+
+      customersUpdated.add(customer.id);
+      invoicesProcessed++;
+
+      processedInvoices.push({
+        identification,
+        customerId: customer.id,
+        customerName: customer.name,
+        invoiceValue,
+        oldBalance,
+        newBalance,
+        status: 'PROCESSED',
+      });
+
+      this.logger.log(
+        `Factura procesada: ${identification} - Valor: ${invoiceValue} - ` +
+          `Balance anterior: ${oldBalance} - Balance nuevo: ${newBalance}`,
+      );
+
+      // Log cada 100 facturas
+      if (invoicesProcessed % 100 === 0) {
+        this.logger.log(
+          `Facturas procesadas: ${invoicesProcessed}/${rows.length}`,
+        );
+      }
+    }
+
+    // Resumen final
+    const summary = {
+      totalInvoices: rows.length,
+      invoicesProcessed,
+      invoicesSkipped,
+      customersUpdated: customersUpdated.size,
+      processedInvoices: dryRun ? processedInvoices : undefined, // Solo devolver detalles en dryRun
+    };
+
+    this.logger.log(`Procesamiento completado: ${JSON.stringify(summary)}`);
+
+    return summary;
   }
 }
