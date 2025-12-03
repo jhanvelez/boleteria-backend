@@ -66,7 +66,7 @@ export class EstablishmentsService {
 
     if (search) {
       qb.where(
-        `(p.numero_local ILIKE :search OR p.clase_local ILIKE :search OR p.destinacion ILIKE :search)`,
+        `(premise.numero_local ILIKE :search OR p.nombreComercial ILIKE :search)`,
         {
           search: `%${search}%`,
         },
