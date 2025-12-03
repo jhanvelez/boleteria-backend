@@ -158,11 +158,21 @@ export class PurchasesService {
       const purchasesToInsert = [];
       const pointsToInsert = [];
       const ticketsToInsert = [];
-      const customersToUpdate = [];
 
-      // ============================================================
-      // CAMBIO CLAVE: Calcular correctamente el balance del cliente
-      // ============================================================
+      const balance = purchasesData[0].remainingBalance;
+
+      const customer = await this.customerRepository.findOne({
+        where: { id: purchasesData[0].customerId },
+      });
+
+      if (!customer) throw new NotFoundException('Cliente no encontrado');
+
+      Object.assign(customer, {
+        currentBalance: balance,
+      });
+
+      await this.customerRepository.save(customer);
+
       purchasesData.forEach((p, idx) => {
         const customer = customersMap.get(p.customerId);
         const raffle = rafflesMap.get(p.raffleId);
@@ -209,16 +219,6 @@ export class PurchasesService {
             createdAt: new Date(),
           });
         }
-
-        // ============================================================
-        // CAMBIO CLAVE: Actualizar el balance en la entidad del mapa
-        // ============================================================
-        customer.currentBalance = newBalance;
-        
-        // Solo agregar al array si no está ya incluido
-        if (!customersToUpdate.some(c => c.id === customer.id)) {
-          customersToUpdate.push(customer);
-        }
       });
 
       const insertedPurchases = await queryRunner.manager
@@ -255,45 +255,27 @@ export class PurchasesService {
         await queryRunner.manager.insert(Ticket, ticketsToInsert);
       }
 
-      // ============================================================
-      // CAMBIO CLAVE: Actualizar clientes DENTRO de la transacción
-      // ============================================================
-      if (customersToUpdate.length > 0) {
-        // Usar el repositorio del queryRunner, no el repositorio global
-        await queryRunner.manager.save(Customer, customersToUpdate);
-        
-        // Verificación de depuración
-        console.log('Clientes actualizados:', customersToUpdate.map(c => ({
-          id: c.id,
-          newBalance: c.currentBalance
-        })));
-      }
-
       await queryRunner.commitTransaction();
 
-      // ============================================================
-      // CAMBIO CLAVE: Verificar que se actualizó después del commit
-      // ============================================================
       if (customerIds.length === 1) {
         const customerId = customerIds[0];
         const updatedCustomer = await this.customerRepository.findOne({
           where: { id: customerId },
-          select: ['id', 'currentBalance']
+          select: ['id', 'currentBalance'],
         });
-        
+
         console.log('Balance después del commit:', {
           customerId,
-          currentBalance: updatedCustomer?.currentBalance
+          currentBalance: updatedCustomer?.currentBalance,
         });
       }
 
-      // Respuesta final
       if (Array.isArray(dto)) {
         return {
           success: true,
           message: 'Compras procesadas exitosamente',
           count: purchasesData.length,
-          newBalance: customersMap.get(customerIds[0])?.currentBalance || 0
+          newBalance: customersMap.get(customerIds[0])?.currentBalance || 0,
         };
       }
 
@@ -301,7 +283,7 @@ export class PurchasesService {
         success: true,
         id: insertedPurchases.raw[0].id,
         invoiceNumber: insertedPurchases.raw[0].invoiceNumber,
-        newBalance: customersMap.get(customerIds[0])?.currentBalance || 0
+        newBalance: customersMap.get(customerIds[0])?.currentBalance || 0,
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();
