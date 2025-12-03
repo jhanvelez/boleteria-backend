@@ -95,14 +95,14 @@ export class CustomersService {
       limit,
     };
 
-    const resp$ = this.httpService.get(`${url}forms/submissions`, {
+    const resp$ = this.httpService.get(`${url}contacts`, {
       headers,
       params,
     });
     const resp = await firstValueFrom(resp$);
     const data = resp.data;
 
-    if (!data || !Array.isArray(data.submissions)) {
+    if (!data || !Array.isArray(data.contacts)) {
       this.logger.warn(
         'Respuesta inesperada de LeadConnector',
         JSON.stringify(data),
@@ -113,24 +113,25 @@ export class CustomersService {
     let processed = 0;
     let imported = 0;
 
-    for (const item of data.submissions) {
+    for (const item of data.contacts) {
       processed++;
+
       const mapped: Partial<Customer> = {
         id: item.id,
-        contactId: item.contactId,
-        formId: item.formId,
-        name: item.others?.fullName || item.name || null,
-        email: item.others?.email || item.email || null,
-        phone: item.others?.phone || null,
-        organization: item.others?.organization || null,
-        postalCode: item.others?.postalCode || null,
-        identification: item.Documento,
-        city: item.others?.city || null,
-        state: item.others?.state || null,
-        country: item.others?.country || null,
-        address: item.others?.address || null,
+        contactId: item.id,
+        formId: item.locationId,
+        name: `${item.firstNameRaw} ${item.lastNameRaw}` || null,
+        email: item.email || null,
+        phone: item.phone || null,
+        organization: item.companyName || null,
+        postalCode: null,
+        identification: item.postalCode,
+        city: item.city || null,
+        state: item.state || null,
+        country: item.country || null,
+        address: item.address1 || null,
         external: item.external ?? false,
-        createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
+        createdAt: item.dateAdded || undefined,
         raw: item,
       };
 
@@ -148,8 +149,14 @@ export class CustomersService {
           }
         }
 
-        await this.repo.save(mapped as Customer);
-        imported++;
+        if (
+          mapped.identification != '' &&
+          mapped.identification != undefined &&
+          mapped.identification != null
+        ) {
+          await this.repo.save(mapped as Customer);
+          imported++;
+        }
       } catch (err) {
         this.logger.error(
           `Error saving customer ${item.id}: ${err.message}`,
