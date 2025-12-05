@@ -68,6 +68,9 @@ export class Customer {
   @OneToMany(() => Point, (point) => point.customer)
   points: Point[];
 
+  @Column({ default: false })
+  vip: boolean;
+
   @CreateDateColumn({ type: 'timestamptz', nullable: true })
   createdAt: Date;
 

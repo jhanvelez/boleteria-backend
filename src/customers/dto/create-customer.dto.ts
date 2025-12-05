@@ -1,12 +1,19 @@
-import { IsOptional, IsString, IsEmail } from 'class-validator';
+import { IsOptional, IsString, IsEmail, IsBoolean } from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
   id: string;
 
+  @IsString()
+  name: string;
+
   @IsOptional()
   @IsString()
-  name?: string;
+  organization?: string;
+
+  @IsOptional()
+  @IsString()
+  postalCode?: string;
 
   @IsOptional()
   @IsEmail()
@@ -20,7 +27,9 @@ export class CreateCustomerDto {
   @IsString()
   city?: string;
 
-  // agrega otros campos según necesites
   @IsOptional()
   raw?: any;
+
+  @IsBoolean()
+  vip: boolean;
 }

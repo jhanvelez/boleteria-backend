@@ -4,7 +4,7 @@ import {
   Post,
   Body,
   Param,
-  Put,
+  Patch,
   Delete,
   Query,
   HttpCode,
@@ -33,7 +33,7 @@ export class CustomersController {
     return this.customersService.create(dto as any);
   }
 
-  @Put(':id')
+  @Patch(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
     return this.customersService.update(id, dto as any);
   }
