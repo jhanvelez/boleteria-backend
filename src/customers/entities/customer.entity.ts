@@ -33,6 +33,9 @@ export class Customer {
   phone: string;
 
   @Column({ type: 'varchar', nullable: true })
+  phone_two: string;
+
+  @Column({ type: 'varchar', nullable: true })
   organization: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -52,6 +55,9 @@ export class Customer {
 
   @Column({ type: 'boolean', default: false })
   external: boolean;
+
+  @Column({ type: 'varchar', nullable: true })
+  vehicle_license_plate: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   currentBalance: number;
