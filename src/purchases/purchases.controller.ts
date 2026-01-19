@@ -12,6 +12,7 @@ import {
 import { PurchasesService } from './purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
+import { PurchaseReportDto } from './dto/purchase-report.dto';
 
 @Controller('purchases')
 export class PurchasesController {
@@ -104,6 +105,20 @@ export class PurchasesController {
       statusCode: HttpStatus.OK,
       message: 'Historial de compras obtenido exitosamente',
       data: history,
+    };
+  }
+
+  @Post('report')
+  async getPurchaseReport(@Body() purchaseReportDto: PurchaseReportDto) {
+    const report = await this.purchasesService.getPurchaseReport(
+      purchaseReportDto.identification,
+      purchaseReportDto.startDate,
+      purchaseReportDto.endDate,
+    );
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Reporte de compras generado exitosamente',
+      data: report,
     };
   }
 

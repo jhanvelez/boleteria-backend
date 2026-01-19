@@ -604,4 +604,138 @@ export class PurchasesService {
       );
     }
   }
+
+  /**
+   * Genera reporte de compras por cliente en un rango de fechas
+   */
+  async getPurchaseReport(
+    identification: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<{
+    data: {
+      customer: {
+        id: string;
+        cedula: string;
+        name: string;
+        email: string;
+        currentBalance: number;
+      };
+      report: {
+        purchases: Array<{
+          id: string;
+          invoiceNumber: string;
+          establishmentInvoiceNumber: string;
+          amount: number;
+          points: number;
+          ticketsGenerated: number;
+          purchaseDate: Date;
+          establishment: {
+            id: string;
+            nombreComercial: string;
+          };
+          raffle: {
+            id: string;
+            name: string;
+          };
+        }>;
+        summary: {
+          totalPurchases: number;
+          totalAmount: number;
+          totalPoints: number;
+          totalTicketsGenerated: number;
+          dateRange: {
+            start: string;
+            end: string;
+          };
+        };
+      };
+    };
+  }> {
+    try {
+      // Buscar cliente por cédula
+      const customer = await this.customerRepository.findOne({
+        where: { identification },
+      });
+
+      if (!customer) {
+        throw new NotFoundException(
+          `Cliente con cédula ${identification} no encontrado`,
+        );
+      }
+
+      // Convertir strings de fecha a Date
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      // Ajustar la fecha final para incluir todo el día
+      end.setHours(23, 59, 59, 999);
+
+      // Obtener las compras en el rango de fechas
+      const purchases = await this.purchaseRepository
+        .createQueryBuilder('purchase')
+        .leftJoinAndSelect('purchase.establishment', 'establishment')
+        .leftJoinAndSelect('purchase.raffle', 'raffle')
+        .where('purchase.customerId = :customerId', { customerId: customer.id })
+        .andWhere('purchase.createdAt >= :startDate', { startDate: start })
+        .andWhere('purchase.createdAt <= :endDate', { endDate: end })
+        .orderBy('purchase.createdAt', 'DESC')
+        .getMany();
+
+      // Calcular resumen
+      const summary = {
+        totalPurchases: purchases.length,
+        totalAmount: purchases.reduce((sum, p) => sum + p.amount, 0),
+        totalPoints: purchases.reduce((sum, p) => sum + p.points, 0),
+        totalTicketsGenerated: purchases.reduce(
+          (sum, p) => sum + p.ticketsGenerated,
+          0,
+        ),
+        dateRange: {
+          start: startDate,
+          end: endDate,
+        },
+      };
+
+      return {
+        data: {
+          customer: {
+            id: customer.id,
+            cedula: customer.identification,
+            name: customer.name,
+            email: customer.email,
+            currentBalance: customer.currentBalance,
+          },
+          report: {
+            purchases: purchases.map((p) => ({
+              id: p.id,
+              invoiceNumber: p.invoiceNumber,
+              establishmentInvoiceNumber: p.establishmentInvoiceNumber,
+              amount: p.amount,
+              points: p.points,
+              ticketsGenerated: p.ticketsGenerated,
+              purchaseDate: p.purchaseDate,
+              establishment: {
+                id: p.establishment.id,
+                nombreComercial: p.establishment.nombreComercial,
+              },
+              raffle: {
+                id: p.raffle.id,
+                name: p.raffle.name,
+              },
+            })),
+            summary,
+          },
+        },
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      console.error(error);
+      throw new InternalServerErrorException(
+        'Error generando reporte de compras',
+      );
+    }
+  }
 }
