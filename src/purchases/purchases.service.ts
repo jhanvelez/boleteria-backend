@@ -16,6 +16,7 @@ import { Raffle } from '../raffles/entities/raffle.entity';
 import { Ticket } from 'src/tickets/entities/ticket.entity';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
+import { InvoiceReportDto } from './dto/invoice-report.dto';
 
 @Injectable()
 export class PurchasesService {
@@ -735,6 +736,116 @@ export class PurchasesService {
       console.error(error);
       throw new InternalServerErrorException(
         'Error generando reporte de compras',
+      );
+    }
+  }
+
+  /**
+   * Reporte general de facturas con totales
+   */
+  async getInvoicesReport(dto: InvoiceReportDto): Promise<{
+    summary: {
+      totalInvoices: number;
+      totalAmount: number;
+      totalTickets: number;
+      dateRange: { start: string | null; end: string | null };
+    };
+    invoices: Array<{
+      id: string;
+      invoiceNumber: string;
+      establishmentInvoiceNumber: string;
+      amount: number;
+      points: number;
+      ticketsGenerated: number;
+      purchaseDate: Date;
+      customer: { id: string; name: string; identification: string };
+      establishment: { id: string; nombreComercial: string };
+      raffle: { id: string; name: string };
+    }>;
+  }> {
+    try {
+      const qb = this.purchaseRepository
+        .createQueryBuilder('purchase')
+        .leftJoinAndSelect('purchase.customer', 'customer')
+        .leftJoinAndSelect('purchase.establishment', 'establishment')
+        .leftJoinAndSelect('purchase.raffle', 'raffle')
+        .orderBy('purchase.purchaseDate', 'DESC');
+
+      if (dto.startDate) {
+        const start = new Date(dto.startDate);
+        start.setHours(0, 0, 0, 0);
+        qb.andWhere('purchase.purchaseDate >= :startDate', {
+          startDate: start,
+        });
+      }
+
+      if (dto.endDate) {
+        const end = new Date(dto.endDate);
+        end.setHours(23, 59, 59, 999);
+        qb.andWhere('purchase.purchaseDate <= :endDate', { endDate: end });
+      }
+
+      if (dto.establishmentId) {
+        qb.andWhere('purchase.establishmentId = :establishmentId', {
+          establishmentId: dto.establishmentId,
+        });
+      }
+
+      if (dto.raffleId) {
+        qb.andWhere('purchase.raffleId = :raffleId', {
+          raffleId: dto.raffleId,
+        });
+      }
+
+      const invoices = await qb.getMany();
+
+      const totalInvoices = invoices.length;
+      const totalAmount = invoices.reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
+      const totalTickets = invoices.reduce(
+        (sum, p) => sum + p.ticketsGenerated,
+        0,
+      );
+
+      return {
+        summary: {
+          totalInvoices,
+          totalAmount,
+          totalTickets,
+          dateRange: {
+            start: dto.startDate || null,
+            end: dto.endDate || null,
+          },
+        },
+        invoices: invoices.map((p) => ({
+          id: p.id,
+          invoiceNumber: p.invoiceNumber,
+          establishmentInvoiceNumber: p.establishmentInvoiceNumber,
+          amount: Number(p.amount),
+          points: p.points,
+          ticketsGenerated: p.ticketsGenerated,
+          purchaseDate: p.purchaseDate,
+          customer: {
+            id: p.customer.id,
+            name: p.customer.name,
+            identification: p.customer.identification,
+          },
+          establishment: {
+            id: p.establishment.id,
+            nombreComercial: p.establishment.nombreComercial,
+          },
+          raffle: {
+            id: p.raffle.id,
+            name: p.raffle.name,
+          },
+        })),
+      };
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Error generando reporte de facturas',
+        error.message,
       );
     }
   }

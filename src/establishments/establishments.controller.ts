@@ -14,6 +14,7 @@ import { CreateEstablishmentDto } from './dto/create-establishment.dto';
 import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { Establishment } from './entities/establishment.entity';
+import { EstablishmentReportDto } from './dto/establishment-report.dto';
 
 @Controller('establishments')
 export class EstablishmentsController {
@@ -57,6 +58,17 @@ export class EstablishmentsController {
   @Get('categories')
   getCategories(): Promise<string[]> {
     return this.establishmentsService.getCategories();
+  }
+
+  @Get('sales-report')
+  async getEstablishmentSalesReport(@Query() dto: EstablishmentReportDto) {
+    const report =
+      await this.establishmentsService.getEstablishmentSalesReport(dto);
+    return {
+      statusCode: 200,
+      message: 'Reporte de establecimientos generado exitosamente',
+      data: report,
+    };
   }
 
   @Get(':id')

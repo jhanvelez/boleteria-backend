@@ -1,8 +1,8 @@
-// src/establishments/establishments.service.ts
 import {
   Injectable,
   NotFoundException,
   ConflictException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +11,8 @@ import { CreateEstablishmentDto } from './dto/create-establishment.dto';
 import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { Premise } from 'src/premise/entities/premise.entity';
+import { Purchase } from 'src/purchases/entities/purchase.entity';
+import { EstablishmentReportDto } from './dto/establishment-report.dto';
 
 @Injectable()
 export class EstablishmentsService {
@@ -19,6 +21,8 @@ export class EstablishmentsService {
     private readonly repo: Repository<Establishment>,
     @InjectRepository(Premise)
     private readonly premiseRepo: Repository<Premise>,
+    @InjectRepository(Purchase)
+    private readonly purchaseRepo: Repository<Purchase>,
   ) {}
 
   async create(dto: CreateEstablishmentDto): Promise<Establishment> {
@@ -222,5 +226,140 @@ export class EstablishmentsService {
       )
       .orderBy('e.nombreComercial', 'ASC')
       .getMany();
+  }
+
+  /**
+   * Reporte de establecimientos por campaña ordenado por mayor monto vendido
+   */
+  async getEstablishmentSalesReport(dto: EstablishmentReportDto): Promise<{
+    summary: {
+      totalEstablishments: number;
+      totalAmount: number;
+      totalInvoices: number;
+      totalTickets: number;
+      dateRange: { start: string | null; end: string | null };
+    };
+    rankings: Array<{
+      rank: number;
+      establishment: {
+        id: string;
+        nombreComercial: string;
+        categoria: string;
+        activoInactivo: boolean;
+        premise: { id: number; numeroLocal: string };
+      };
+      totalAmount: number;
+      totalInvoices: number;
+      totalTickets: number;
+      percentageOfTotal: number;
+    }>;
+  }> {
+    try {
+      const qb = this.purchaseRepo
+        .createQueryBuilder('purchase')
+        .innerJoin('purchase.establishment', 'establishment')
+        .innerJoin('establishment.premise', 'premise')
+        .select('establishment.id', 'establishmentId')
+        .addSelect('establishment.nombreComercial', 'nombreComercial')
+        .addSelect('establishment.categoria', 'categoria')
+        .addSelect('establishment.activoInactivo', 'activoInactivo')
+        .addSelect('premise.id', 'premiseId')
+        .addSelect('premise.numero_local', 'numeroLocal')
+        .addSelect('SUM(purchase.amount)', 'totalAmount')
+        .addSelect('COUNT(purchase.id)', 'totalInvoices')
+        .addSelect('SUM(purchase.ticketsGenerated)', 'totalTickets')
+        .groupBy('establishment.id')
+        .addGroupBy('establishment.nombreComercial')
+        .addGroupBy('establishment.categoria')
+        .addGroupBy('establishment.activoInactivo')
+        .addGroupBy('premise.id')
+        .addGroupBy('premise.numero_local')
+        .orderBy('SUM(purchase.amount)', 'DESC');
+
+      if (dto.startDate) {
+        const start = new Date(dto.startDate);
+        start.setHours(0, 0, 0, 0);
+        qb.andWhere('purchase.purchaseDate >= :startDate', {
+          startDate: start,
+        });
+      }
+
+      if (dto.endDate) {
+        const end = new Date(dto.endDate);
+        end.setHours(23, 59, 59, 999);
+        qb.andWhere('purchase.purchaseDate <= :endDate', { endDate: end });
+      }
+
+      if (dto.raffleId) {
+        qb.andWhere('purchase.raffleId = :raffleId', {
+          raffleId: dto.raffleId,
+        });
+      }
+
+      if (dto.premiseId) {
+        qb.andWhere('establishment.premiseId = :premiseId', {
+          premiseId: dto.premiseId,
+        });
+      }
+
+      const rows = await qb.getRawMany();
+
+      const totalAmount = rows.reduce(
+        (sum, r) => sum + parseFloat(r.totalAmount || 0),
+        0,
+      );
+      const totalInvoices = rows.reduce(
+        (sum, r) => sum + parseInt(r.totalInvoices || 0),
+        0,
+      );
+      const totalTickets = rows.reduce(
+        (sum, r) => sum + parseInt(r.totalTickets || 0),
+        0,
+      );
+
+      const rankings = rows.map((r, index) => ({
+        rank: index + 1,
+        establishment: {
+          id: r.establishmentId,
+          nombreComercial: r.nombreComercial,
+          categoria: r.categoria,
+          activoInactivo: r.activoInactivo,
+          premise: {
+            id: r.premiseId,
+            numeroLocal: r.numeroLocal,
+          },
+        },
+        totalAmount: parseFloat(r.totalAmount || 0),
+        totalInvoices: parseInt(r.totalInvoices || 0),
+        totalTickets: parseInt(r.totalTickets || 0),
+        percentageOfTotal:
+          totalAmount > 0
+            ? parseFloat(
+                ((parseFloat(r.totalAmount || 0) / totalAmount) * 100).toFixed(
+                  2,
+                ),
+              )
+            : 0,
+      }));
+
+      return {
+        summary: {
+          totalEstablishments: rankings.length,
+          totalAmount,
+          totalInvoices,
+          totalTickets,
+          dateRange: {
+            start: dto.startDate || null,
+            end: dto.endDate || null,
+          },
+        },
+        rankings,
+      };
+    } catch (error) {
+      console.error(error);
+      throw new InternalServerErrorException(
+        'Error generando reporte de establecimientos',
+      );
+    }
   }
 }
