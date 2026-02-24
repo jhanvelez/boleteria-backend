@@ -743,26 +743,7 @@ export class PurchasesService {
   /**
    * Reporte general de facturas con totales
    */
-  async getInvoicesReport(dto: InvoiceReportDto): Promise<{
-    summary: {
-      totalInvoices: number;
-      totalAmount: number;
-      totalTickets: number;
-      dateRange: { start: string | null; end: string | null };
-    };
-    invoices: Array<{
-      id: string;
-      invoiceNumber: string;
-      establishmentInvoiceNumber: string;
-      amount: number;
-      points: number;
-      ticketsGenerated: number;
-      purchaseDate: Date;
-      customer: { id: string; name: string; identification: string };
-      establishment: { id: string; nombreComercial: string };
-      raffle: { id: string; name: string };
-    }>;
-  }> {
+  async getInvoicesReport(dto: InvoiceReportDto) {
     try {
       const qb = this.purchaseRepository
         .createQueryBuilder('purchase')
@@ -799,13 +780,23 @@ export class PurchasesService {
 
       const invoices = await qb.getMany();
 
+      const purchaseIds = invoices.map((p) => p.id);
+
+      let totalTickets = 0;
+
+      if (purchaseIds.length > 0) {
+        const ticketCountResult = await this.ticketRepository
+          .createQueryBuilder('ticket')
+          .select('COUNT(ticket.id)', 'total')
+          .where('ticket.purchaseId IN (:...purchaseIds)', { purchaseIds })
+          .getRawOne();
+
+        totalTickets = parseInt(ticketCountResult?.total || '0', 10);
+      }
+
       const totalInvoices = invoices.length;
       const totalAmount = invoices.reduce(
         (sum, p) => sum + Number(p.amount),
-        0,
-      );
-      const totalTickets = invoices.reduce(
-        (sum, p) => sum + p.ticketsGenerated,
         0,
       );
 

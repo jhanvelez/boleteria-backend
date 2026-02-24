@@ -12,6 +12,7 @@ import { UpdateEstablishmentDto } from './dto/update-establishment.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { Premise } from 'src/premise/entities/premise.entity';
 import { Purchase } from 'src/purchases/entities/purchase.entity';
+import { Ticket } from 'src/tickets/entities/ticket.entity';
 import { EstablishmentReportDto } from './dto/establishment-report.dto';
 
 @Injectable()
@@ -23,6 +24,8 @@ export class EstablishmentsService {
     private readonly premiseRepo: Repository<Premise>,
     @InjectRepository(Purchase)
     private readonly purchaseRepo: Repository<Purchase>,
+    @InjectRepository(Ticket)
+    private readonly ticketRepository: Repository<Ticket>,
   ) {}
 
   async create(dto: CreateEstablishmentDto): Promise<Establishment> {
@@ -231,29 +234,7 @@ export class EstablishmentsService {
   /**
    * Reporte de establecimientos por campaña ordenado por mayor monto vendido
    */
-  async getEstablishmentSalesReport(dto: EstablishmentReportDto): Promise<{
-    summary: {
-      totalEstablishments: number;
-      totalAmount: number;
-      totalInvoices: number;
-      totalTickets: number;
-      dateRange: { start: string | null; end: string | null };
-    };
-    rankings: Array<{
-      rank: number;
-      establishment: {
-        id: string;
-        nombreComercial: string;
-        categoria: string;
-        activoInactivo: boolean;
-        premise: { id: number; numeroLocal: string };
-      };
-      totalAmount: number;
-      totalInvoices: number;
-      totalTickets: number;
-      percentageOfTotal: number;
-    }>;
-  }> {
+  async getEstablishmentSalesReport(dto: EstablishmentReportDto) {
     try {
       const qb = this.purchaseRepo
         .createQueryBuilder('purchase')
@@ -267,7 +248,6 @@ export class EstablishmentsService {
         .addSelect('premise.numero_local', 'numeroLocal')
         .addSelect('SUM(purchase.amount)', 'totalAmount')
         .addSelect('COUNT(purchase.id)', 'totalInvoices')
-        .addSelect('SUM(purchase.ticketsGenerated)', 'totalTickets')
         .groupBy('establishment.id')
         .addGroupBy('establishment.nombreComercial')
         .addGroupBy('establishment.categoria')
@@ -304,6 +284,69 @@ export class EstablishmentsService {
 
       const rows = await qb.getRawMany();
 
+      if (rows.length === 0) {
+        return {
+          summary: {
+            totalEstablishments: 0,
+            totalAmount: 0,
+            totalInvoices: 0,
+            totalTickets: 0,
+            dateRange: {
+              start: dto.startDate || null,
+              end: dto.endDate || null,
+            },
+          },
+          rankings: [],
+        };
+      }
+
+      // ✅ Contar boletas reales por establecimiento desde tabla tickets
+      const establishmentIds = rows.map((r) => r.establishmentId);
+
+      const ticketQb = this.ticketRepository
+        .createQueryBuilder('ticket')
+        .innerJoin('ticket.purchase', 'purchase')
+        .select('purchase.establishmentId', 'establishmentId')
+        .addSelect('COUNT(ticket.id)', 'totalTickets')
+        .where('purchase.establishmentId IN (:...establishmentIds)', {
+          establishmentIds,
+        })
+        .groupBy('purchase.establishmentId');
+
+      // Aplicar los mismos filtros de fecha y rifa
+      if (dto.startDate) {
+        const start = new Date(dto.startDate);
+        start.setHours(0, 0, 0, 0);
+        ticketQb.andWhere('purchase.purchaseDate >= :startDate', {
+          startDate: start,
+        });
+      }
+
+      if (dto.endDate) {
+        const end = new Date(dto.endDate);
+        end.setHours(23, 59, 59, 999);
+        ticketQb.andWhere('purchase.purchaseDate <= :endDate', {
+          endDate: end,
+        });
+      }
+
+      if (dto.raffleId) {
+        ticketQb.andWhere('purchase.raffleId = :raffleId', {
+          raffleId: dto.raffleId,
+        });
+      }
+
+      const ticketCounts = await ticketQb.getRawMany();
+
+      // Map para acceso rápido por establishmentId
+      const ticketCountMap = new Map<string, number>(
+        ticketCounts.map((t) => [
+          t.establishmentId,
+          parseInt(t.totalTickets || '0', 10),
+        ]),
+      );
+
+      // Calcular totales
       const totalAmount = rows.reduce(
         (sum, r) => sum + parseFloat(r.totalAmount || 0),
         0,
@@ -312,8 +355,8 @@ export class EstablishmentsService {
         (sum, r) => sum + parseInt(r.totalInvoices || 0),
         0,
       );
-      const totalTickets = rows.reduce(
-        (sum, r) => sum + parseInt(r.totalTickets || 0),
+      const totalTickets = Array.from(ticketCountMap.values()).reduce(
+        (sum, v) => sum + v,
         0,
       );
 
@@ -331,7 +374,7 @@ export class EstablishmentsService {
         },
         totalAmount: parseFloat(r.totalAmount || 0),
         totalInvoices: parseInt(r.totalInvoices || 0),
-        totalTickets: parseInt(r.totalTickets || 0),
+        totalTickets: ticketCountMap.get(r.establishmentId) ?? 0, // ✅ real
         percentageOfTotal:
           totalAmount > 0
             ? parseFloat(

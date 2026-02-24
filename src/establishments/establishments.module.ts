@@ -6,6 +6,7 @@ import { EstablishmentsController } from './establishments.controller';
 import { Premise } from 'src/premise/entities/premise.entity';
 import { EstablishmentInvoiceCounter } from './entities/establishment-invoice-counter.entity';
 import { Purchase } from 'src/purchases/entities/purchase.entity';
+import { Ticket } from 'src/tickets/entities/ticket.entity';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Purchase } from 'src/purchases/entities/purchase.entity';
       Premise,
       EstablishmentInvoiceCounter,
       Purchase,
+      Ticket,
     ]),
   ],
   controllers: [EstablishmentsController],
