@@ -822,6 +822,7 @@ export class PurchasesService {
             id: p.customer.id,
             name: p.customer.name,
             identification: p.customer.identification,
+            phone: p.customer.phone,
           },
           establishment: {
             id: p.establishment.id,
