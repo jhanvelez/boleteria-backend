@@ -17,5 +17,5 @@ export class EstablishmentReportDto {
   @IsNumber()
   @IsOptional()
   @Type(() => Number)
-  premiseId?: number;
+  establishmentId?: number;
 }

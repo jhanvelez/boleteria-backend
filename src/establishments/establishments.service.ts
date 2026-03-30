@@ -276,9 +276,9 @@ export class EstablishmentsService {
         });
       }
 
-      if (dto.premiseId) {
-        qb.andWhere('establishment.premiseId = :premiseId', {
-          premiseId: dto.premiseId,
+      if (dto.establishmentId) {
+        qb.andWhere('establishment.id = :establishmentId', {
+          establishmentId: dto.establishmentId,
         });
       }
 
