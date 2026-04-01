@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsDateString, IsUUID } from 'class-validator';
+import { IsOptional, IsString, IsDateString } from 'class-validator';
 
 export class EstablishmentReportDto {
   @IsDateString()
@@ -13,6 +13,7 @@ export class EstablishmentReportDto {
   @IsOptional()
   raffleId?: string;
 
-  @IsUUID()
+  @IsString()
+  @IsOptional()
   establishmentId?: string;
 }
