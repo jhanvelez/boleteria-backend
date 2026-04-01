@@ -300,7 +300,6 @@ export class EstablishmentsService {
         };
       }
 
-      // ✅ Contar boletas reales por establecimiento desde tabla tickets
       const establishmentIds = rows.map((r) => r.establishmentId);
 
       const ticketQb = this.ticketRepository

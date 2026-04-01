@@ -1,5 +1,4 @@
-import { IsOptional, IsString, IsDateString, IsNumber } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsString, IsDateString, IsUUID } from 'class-validator';
 
 export class EstablishmentReportDto {
   @IsDateString()
@@ -14,8 +13,6 @@ export class EstablishmentReportDto {
   @IsOptional()
   raffleId?: string;
 
-  @IsNumber()
-  @IsOptional()
-  @Type(() => Number)
-  establishmentId?: number;
+  @IsUUID()
+  establishmentId?: string;
 }
