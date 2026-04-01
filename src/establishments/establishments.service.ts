@@ -335,16 +335,6 @@ export class EstablishmentsService {
         });
       }
 
-      const ticketCounts = await ticketQb.getRawMany();
-
-      // Map para acceso rápido por establishmentId
-      const ticketCountMap = new Map<string, number>(
-        ticketCounts.map((t) => [
-          t.establishmentId,
-          parseInt(t.totalTickets || '0', 10),
-        ]),
-      );
-
       // Calcular totales
       const totalAmount = rows.reduce(
         (sum, r) => sum + parseFloat(r.totalAmount || 0),
@@ -354,10 +344,7 @@ export class EstablishmentsService {
         (sum, r) => sum + parseInt(r.totalInvoices || 0),
         0,
       );
-      const totalTickets = Array.from(ticketCountMap.values()).reduce(
-        (sum, v) => sum + v,
-        0,
-      );
+      const totalTickets = Math.floor(totalAmount / 100000);
 
       const rankings = rows.map((r, index) => ({
         rank: index + 1,
@@ -373,7 +360,7 @@ export class EstablishmentsService {
         },
         totalAmount: parseFloat(r.totalAmount || 0),
         totalInvoices: parseInt(r.totalInvoices || 0),
-        totalTickets: ticketCountMap.get(r.establishmentId) ?? 0, // ✅ real
+        totalTickets: Math.floor(parseFloat(r.totalAmount || 0) / 100000),
         percentageOfTotal:
           totalAmount > 0
             ? parseFloat(
