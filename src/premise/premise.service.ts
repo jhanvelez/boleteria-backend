@@ -42,7 +42,7 @@ export class PremiseService {
 
     const [data, total] = await qb
       .skip(skip)
-      .take(limit)
+      .take(1000) // Limitar a 1000 resultados para evitar problemas de rendimiento
       .orderBy('p.numero_local', 'ASC')
       .getManyAndCount();
 
@@ -50,7 +50,7 @@ export class PremiseService {
       data,
       total,
       currentPage: page,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / 1000), // Calcular total de páginas basado en el límite de 1000 resultados
     };
   }
 
